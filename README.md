@@ -26,10 +26,10 @@ ln -s ~/git-work/git-work ~/bin/git-work     # or ~/.local/bin/git-work
 ```
 ## Features (current version)
 
-- **Safe guardrails (warns on main/master)
-- **Different message styles depending on number of changed files
-- **Dry-run support
-- **Confirmation before commit/push
+- **Safe guardrails (warns on main/master)**
+- **Different message styles depending on number of changed files**
+- **Dry-run support**
+- **Confirmation before commit/push**
 
 ## License
 
