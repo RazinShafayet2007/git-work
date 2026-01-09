@@ -1,30 +1,36 @@
 #!/usr/bin/env bash
 # git-work
-# Quick workflow helper: stage everything → reasonable commit message → optional push
-# Version: 0.1.0 (January 2026)
+# Quick workflow helper: stage everything → smart commit message (Gemini AI if key set) → optional push
+# Version: 0.2.1-gemini (January 2026)
 
 set -euo pipefail
 
 # ─── CONFIGURATION ───────────────────────────────────────────────────────────
 DEFAULT_REMOTE="origin"
 AUTO_PUSH=true                  # set to false to disable auto-push
+USE_AI=true                     # set to false to always use simple fallback
+
+GEMINI_MODEL="gemini-1.5-flash" # options: gemini-1.5-flash (fast), gemini-1.5-pro (better)
 
 # ─── HELP ────────────────────────────────────────────────────────────────────
 show_help() {
     cat <<'EOF'
 git work [options]
 
-Quick workflow: stage all → commit with reasonable message → push current branch
+Stage all → smart commit message (Gemini AI if API key set) → commit → (optional) push
 
 Options:
   --no-push        Commit but do NOT push
+  --no-ai          Force simple rule-based message
   --help, -h       Show this help
   --dry-run        Show what would happen without making changes
+
+Setup for AI:
+  export GEMINI_API_KEY="your-key-from-aistudio.google.com"
 
 Examples:
   git work
   git work --no-push
-  git work --dry-run
 EOF
     exit 0
 }
@@ -36,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --help|-h)      show_help ;;
         --dry-run)      DRY_RUN=true; shift ;;
         --no-push)      AUTO_PUSH=false; shift ;;
+        --no-ai)        USE_AI=false; shift ;;
         *)              echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -73,24 +80,62 @@ else
     git add -A
 fi
 
-# ─── COMMIT MESSAGE GENERATION ───────────────────────────────────────────────
-generate_message() {
+# ─── COMMIT MESSAGE FUNCTIONS ────────────────────────────────────────────────
+
+generate_fallback_message() {
     local file_count=$(git diff --cached --name-only | wc -l | tr -d ' ')
     local stats=$(git diff --cached --stat | tail -n 1 | sed 's/^[[:space:]]*//')
-    local main_file=$(git diff --cached --name-only | head -n 1)
+    local main_file=$(git diff --cached --name-only | head -n 1 | xargs basename 2>/dev/null || echo "files")
 
     if [ "$file_count" -eq 0 ]; then
         echo "chore: empty commit $(date +'%Y-%m-%d %H:%M')"
     elif [ "$file_count" -eq 1 ]; then
-        echo "update: ${main_file}"
+        echo "chore: update ${main_file}"
     elif [ "$file_count" -le 3 ]; then
-        echo "chore: update ${file_count} files"
+        echo "chore: updates across ${file_count} files"
     else
         echo "chore: multiple changes - ${stats}"
     fi
 }
 
-COMMIT_MSG=$(generate_message)
+generate_gemini_message() {
+    local diff_content="$1"
+
+    if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+        echo ""
+        return
+    fi
+
+    echo "→ Using Google Gemini API (${GEMINI_MODEL})..." >&2
+
+    local prompt="Create a concise conventional commit message (max 72 chars) for these code changes. Format: type(scope): description. Types: feat, fix, refactor, perf, style, test, docs, build, ci, chore. Be specific.\n\nChanges:\n${diff_content}"
+
+    local raw_output
+    raw_output=$(curl -s "https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}" \
+        -H 'Content-Type: application/json' \
+        -d '{
+          "contents": [{"parts": [{"text": "'"${prompt}"'"}]}],
+          "generationConfig": {"temperature": 0.3, "maxOutputTokens": 80}
+        }' | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null || echo "")
+
+    # Clean output
+    echo "$raw_output" | sed 's/^["'\'' ]*//; s/["'\'' ]*$//; s/\\n.*//g' | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+# ─── DECIDE MESSAGE ──────────────────────────────────────────────────────────
+DIFF=$(git diff --cached)
+
+if $USE_AI && [ -n "$DIFF" ]; then
+    AI_MSG=$(generate_gemini_message "$DIFF")
+    if [ -n "$AI_MSG" ] && [ ${#AI_MSG} -le 80 ]; then
+        COMMIT_MSG="$AI_MSG"
+    else
+        echo "warning: Gemini unavailable or failed → using fallback" >&2
+        COMMIT_MSG=$(generate_fallback_message)
+    fi
+else
+    COMMIT_MSG=$(generate_fallback_message)
+fi
 
 echo
 echo "Commit message:"
@@ -102,30 +147,27 @@ if $DRY_RUN; then
     exit 0
 fi
 
-# ─── CONFIRMATION ────────────────────────────────────────────────────────────
+# ─── CONFIRMATION & COMMIT & PUSH ───────────────────────────────────────────
 read -p "→ Commit ${AUTO_PUSH:+& push}? [Y/n/e(edit)] " -n 1 -r choice
 echo
 
 case $choice in
     ""|y|Y|yes) ;;
     e|E|edit)
-        echo "Enter your commit message (finish with Ctrl+D or empty line):"
+        echo "Enter your commit message:"
         COMMIT_MSG=$(cat)
         ;;
     *) echo "Cancelled."; exit 0 ;;
 esac
 
-# ─── COMMIT ──────────────────────────────────────────────────────────────────
 echo "→ Creating commit..."
 git commit -m "$COMMIT_MSG"
 
-# ─── PUSH (if enabled) ───────────────────────────────────────────────────────
 if $AUTO_PUSH; then
     echo "→ Pushing to ${DEFAULT_REMOTE} ${CURRENT_BRANCH}..."
     git push "${DEFAULT_REMOTE}" "${CURRENT_BRANCH}"
     echo
     echo "Done! ✓"
 else
-    echo "Commit created. Push when ready:"
-    echo "  git push ${DEFAULT_REMOTE} ${CURRENT_BRANCH}"
+    echo "Commit created. Push when ready."
 fi
