@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# git-work
+# Quick workflow helper: stage everything → reasonable commit message → optional push
+# Version: 0.1.0 (January 2026)
+
+set -euo pipefail
+
+# ─── CONFIGURATION ───────────────────────────────────────────────────────────
+DEFAULT_REMOTE="origin"
+AUTO_PUSH=true                  # set to false to disable auto-push
+
+# ─── HELP ────────────────────────────────────────────────────────────────────
+show_help() {
+    cat <<'EOF'
+git work [options]
+
+Quick workflow: stage all → commit with reasonable message → push current branch
+
+Options:
+  --no-push        Commit but do NOT push
+  --help, -h       Show this help
+  --dry-run        Show what would happen without making changes
+
+Examples:
+  git work
+  git work --no-push
+  git work --dry-run
+EOF
+    exit 0
+}
+
+# ─── ARGUMENT PARSING ────────────────────────────────────────────────────────
+DRY_RUN=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help|-h)      show_help ;;
+        --dry-run)      DRY_RUN=true; shift ;;
+        --no-push)      AUTO_PUSH=false; shift ;;
+        *)              echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# ─── SAFETY CHECKS ───────────────────────────────────────────────────────────
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "error: not inside a git repository" >&2
+    exit 1
+fi
+
+CURRENT_BRANCH=$(git branch --show-current)
+if [[ -z "$CURRENT_BRANCH" ]]; then
+    echo "error: cannot detect current branch (detached HEAD?)" >&2
+    exit 1
+fi
+
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" ]]; then
+    echo "⚠️  You are on main/master branch!"
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+fi
+
+# ─── CHECK IF THERE IS ANYTHING TO COMMIT ────────────────────────────────────
+if [[ -z "$(git status --porcelain --untracked-files=all)" ]]; then
+    echo "Nothing to commit."
+    exit 0
+fi
+
+# ─── STAGE ───────────────────────────────────────────────────────────────────
+echo "→ Staging all changes..."
+if $DRY_RUN; then
+    echo "   (dry-run) git add -A"
+else
+    git add -A
+fi
+
+# ─── COMMIT MESSAGE GENERATION ───────────────────────────────────────────────
+generate_message() {
+    local file_count=$(git diff --cached --name-only | wc -l | tr -d ' ')
+    local stats=$(git diff --cached --stat | tail -n 1 | sed 's/^[[:space:]]*//')
+    local main_file=$(git diff --cached --name-only | head -n 1)
+
+    if [ "$file_count" -eq 0 ]; then
+        echo "chore: empty commit $(date +'%Y-%m-%d %H:%M')"
+    elif [ "$file_count" -eq 1 ]; then
+        echo "update: ${main_file}"
+    elif [ "$file_count" -le 3 ]; then
+        echo "chore: update ${file_count} files"
+    else
+        echo "chore: multiple changes - ${stats}"
+    fi
+}
+
+COMMIT_MSG=$(generate_message)
+
+echo
+echo "Commit message:"
+echo "  $COMMIT_MSG"
+echo
+
+if $DRY_RUN; then
+    echo "(dry-run mode - no real changes made)"
+    exit 0
+fi
+
+# ─── CONFIRMATION ────────────────────────────────────────────────────────────
+read -p "→ Commit ${AUTO_PUSH:+& push}? [Y/n/e(edit)] " -n 1 -r choice
+echo
+
+case $choice in
+    ""|y|Y|yes) ;;
+    e|E|edit)
+        echo "Enter your commit message (finish with Ctrl+D or empty line):"
+        COMMIT_MSG=$(cat)
+        ;;
+    *) echo "Cancelled."; exit 0 ;;
+esac
+
+# ─── COMMIT ──────────────────────────────────────────────────────────────────
+echo "→ Creating commit..."
+git commit -m "$COMMIT_MSG"
+
+# ─── PUSH (if enabled) ───────────────────────────────────────────────────────
+if $AUTO_PUSH; then
+    echo "→ Pushing to ${DEFAULT_REMOTE} ${CURRENT_BRANCH}..."
+    git push "${DEFAULT_REMOTE}" "${CURRENT_BRANCH}"
+    echo
+    echo "Done! ✓"
+else
+    echo "Commit created. Push when ready:"
+    echo "  git push ${DEFAULT_REMOTE} ${CURRENT_BRANCH}"
+fi
