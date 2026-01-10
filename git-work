@@ -102,55 +102,56 @@ generate_gemini_message() {
 
     if [[ -z "${GEMINI_API_KEY:-}" ]]; then
         echo "Gemini API key not found" >&2
-        echo ""
         return
     fi
 
     echo "→ Using Google Gemini API (${GEMINI_MODEL})..." >&2
 
-    local prompt="You are an expert git commit message writer. Generate EXACTLY ONE conventional commit message based on the changed files and stats below. Output NOTHING else - no explanations, no lists, no quotes. Format: type(scope): description (max 72 chars). Types: feat, fix, refactor, perf, style, test, docs, build, ci, chore.\n\n${diff_content}"
+    # 1. Use jq to build the JSON safely. This handles newlines/quotes in diff_content automatically.
+    local json_payload
+    json_payload=$(jq -n \
+        --arg diff "$diff_content" \
+        --arg model "$GEMINI_MODEL" \
+        '{
+            contents: [{
+                parts: [{
+                    text: ("Generate EXACTLY ONE conventional commit message for these changes. Output NOTHING ELSE — no explanations, no lists, no quotes. \n\nFormat strictly: type(scope): description\nTypes: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert\nMax 72 chars.\n\nSummary:\n" + $diff)
+                }]
+            }],
+            generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 128
+            }
+        }')
+
+    # 2. Send request
     local response
     response=$(curl -s -X POST \
-        "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent" \
+        "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}" \
         -H "Content-Type: application/json" \
-        -H "x-goog-api-key: ${GEMINI_API_KEY}" \
-        -d '{
-  "contents": [{
-    "parts": [{
-      "text": "Generate EXACTLY ONE conventional commit message for these changes. Output NOTHING ELSE — no explanations, no lists, no quotes, no additional text. Format strictly: type(scope): description\n\nTypes: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert\nMax 72 characters. Be specific and accurate.\n\nSummary:\n'"${diff_content}"'"
-    }]
-  }],
-  "generationConfig": {
-    "temperature": 0.1,
-    "maxOutputTokens": 128
-  }
-}' || echo "")
+        -d "$json_payload")
 
+    # 3. Parse response
     local generated_text
     generated_text=$(echo "$response" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null)
 
-    # Clean the output
+    # 4. Clean the output (remove markdown code blocks if Gemini adds them)
     local cleaned
     cleaned=$(echo "$generated_text" \
-        | sed 's/^["'\'' ]*//; s/["'\'' ]*$//; s/\\n.*//g' \
+        | sed 's/```.*//g' \
+        | sed 's/^["'\'' ]*//; s/["'\'' ]*$//' \
         | tr -d '\n\r' \
         | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
-    if [[ -n "$cleaned" && ${#cleaned} -le 80 ]]; then
-    # Quick basic check if it looks like conventional commit
-    if [[ "$cleaned" == feat:* || "$cleaned" == fix:* || "$cleaned" == refactor:* || \
-          "$cleaned" == perf:* || "$cleaned" == style:* || "$cleaned" == test:* || \
-          "$cleaned" == docs:* || "$cleaned" == build:* || "$cleaned" == ci:* || \
-          "$cleaned" == chore:* || "$cleaned" == revert:* ]]; then
+    # 5. Robust Validation using Regex
+    # Matches: type followed by optional (scope), a colon, space, then text.
+    if [[ "$cleaned" =~ ^(feat|fix|refactor|perf|style|test|docs|build|ci|chore|revert)(\(.*\))?:[[:space:]].+ ]]; then
         echo "$cleaned"
     else
+        # If debug is needed, uncomment the next line to see what Gemini actually sent
+        # echo "DEBUG: Gemini sent: [$cleaned]" >&2
         echo "Gemini response doesn't look like conventional commit" >&2
-        echo ""
     fi
-else
-    echo "Gemini response invalid or empty" >&2
-    echo ""
-fi
 }
 
 # ─── DECIDE MESSAGE ──────────────────────────────────────────────────────────
