@@ -118,11 +118,11 @@ generate_gemini_message() {
         -d '{
   "contents": [{
     "parts": [{
-      "text": "Generate exactly one concise conventional commit message for these changes. Output ONLY the message itself (no explanations, no lists, no quotes). Format: type(scope): description. Types: feat, fix, refactor, perf, style, test, docs, build, ci, chore. Max 72 chars.\n\nChanges:\n'"${diff_content}"'"
+      "text": "Generate EXACTLY ONE conventional commit message for these changes. Output NOTHING ELSE — no explanations, no lists, no quotes, no additional text. Format strictly: type(scope): description\n\nTypes: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert\nMax 72 characters. Be specific and accurate.\n\nChanges:\n'"${diff_content}"'"
     }]
   }],
   "generationConfig": {
-    "temperature": 0.2,
+    "temperature": 0.1,
     "maxOutputTokens": 128
   }
 }' || echo "")
