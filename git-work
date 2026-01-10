@@ -116,16 +116,16 @@ generate_gemini_message() {
         -H "Content-Type: application/json" \
         -H "x-goog-api-key: ${GEMINI_API_KEY}" \
         -d '{
-          "contents": [{
-            "parts": [{
-              "text": "'"${prompt}"'"
-            }]
-          }],
-          "generationConfig": {
-            "temperature": 0.3,
-            "maxOutputTokens": 80
-          }
-        }' || echo "")
+  "contents": [{
+    "parts": [{
+      "text": "Generate exactly one concise conventional commit message for these changes. Output ONLY the message itself (no explanations, no lists, no quotes). Format: type(scope): description. Types: feat, fix, refactor, perf, style, test, docs, build, ci, chore. Max 72 chars.\n\nChanges:\n'"${diff_content}"'"
+    }]
+  }],
+  "generationConfig": {
+    "temperature": 0.2,
+    "maxOutputTokens": 128
+  }
+}' || echo "")
 
     local generated_text
     generated_text=$(echo "$response" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null)
