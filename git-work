@@ -137,12 +137,21 @@ generate_gemini_message() {
         | tr -d '\n\r' \
         | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
-    if [[ -n "$cleaned" && ${#cleaned} -le 80 && "$cleaned" =~ ^(feat|fix|refactor|perf|style|test|docs|build|ci|chore|revert)(\([^)]+\))?: ]]; then
+    if [[ -n "$cleaned" && ${#cleaned} -le 80 ]]; then
+    # Quick basic check if it looks like conventional commit
+    if [[ "$cleaned" == feat:* || "$cleaned" == fix:* || "$cleaned" == refactor:* || \
+          "$cleaned" == perf:* || "$cleaned" == style:* || "$cleaned" == test:* || \
+          "$cleaned" == docs:* || "$cleaned" == build:* || "$cleaned" == ci:* || \
+          "$cleaned" == chore:* || "$cleaned" == revert:* ]]; then
         echo "$cleaned"
     else
-        echo "Gemini response invalid or empty" >&2
+        echo "Gemini response doesn't look like conventional commit" >&2
         echo ""
     fi
+else
+    echo "Gemini response invalid or empty" >&2
+    echo ""
+fi
 }
 
 # ─── DECIDE MESSAGE ──────────────────────────────────────────────────────────
