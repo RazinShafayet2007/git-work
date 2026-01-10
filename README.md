@@ -33,4 +33,4 @@ ln -s ~/git-work/git-work ~/bin/git-work     # or ~/.local/bin/git-work
 
 ## License
 
-MIT 
+MIT
