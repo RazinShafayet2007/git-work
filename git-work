@@ -108,8 +108,7 @@ generate_gemini_message() {
 
     echo "→ Using Google Gemini API (${GEMINI_MODEL})..." >&2
 
-    local prompt="Create a concise conventional commit message (max 72 chars) for these code changes. Format exactly: type(scope): description. Allowed types: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert. Be specific and meaningful based on the diff. No period at the end. Output ONLY the commit message, nothing else.\n\nChanges:\n${diff_content}"
-
+    local prompt="You are an expert git commit message writer. Generate EXACTLY ONE conventional commit message based on the changed files and stats below. Output NOTHING else - no explanations, no lists, no quotes. Format: type(scope): description (max 72 chars). Types: feat, fix, refactor, perf, style, test, docs, build, ci, chore.\n\n${diff_content}"
     local response
     response=$(curl -s -X POST \
         "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent" \
@@ -155,16 +154,15 @@ fi
 }
 
 # ─── DECIDE MESSAGE ──────────────────────────────────────────────────────────
-# Smart summarized diff for Gemini (avoids overload on large changes)
-DIFF_STATS=$(git diff --cached --stat | tail -n 10)
-DIFF_FILES=$(git diff --cached --name-only | sed 's/^/  - /' )
-DIFF_SAMPLE=$(git diff --cached | head -n 100 || echo "  (large diff truncated)")
+# Short safe summary for Gemini (no raw diff to avoid quoting/token issues)
+DIFF_STATS=$(git diff --cached --stat || echo "unknown changes")
+DIFF_FILES=$(git diff --cached --name-only | sed 's/^/  - /' || echo "  - various files")
 
-DIFF="Summary:\n$DIFF_STATS\n\nChanged files:\n$DIFF_FILES\n\nSample changes:\n$DIFF_SAMPLE"
+DIFF="Changed files:\n$DIFF_FILES\n\nStats:\n$DIFF_STATS"
 
 if $USE_AI && [ -n "$DIFF" ]; then
     AI_MSG=$(generate_gemini_message "$DIFF")
-    if [ -n "$AI_MSG" ] && [ ${#AI_MSG} -le 80 ]; then
+    if [ -n "$AI_MSG" ]; then
         COMMIT_MSG="$AI_MSG"
     else
         echo "warning: Gemini unavailable or failed → using fallback" >&2
