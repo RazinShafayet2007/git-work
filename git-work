@@ -10,8 +10,7 @@ DEFAULT_REMOTE="origin"
 AUTO_PUSH=true                  # set to false to disable auto-push
 USE_AI=true                     # set to false to always use simple fallback
 
-GEMINI_MODEL="gemini-1.5-flash" # options: gemini-1.5-flash (fast), gemini-1.5-pro (better)
-
+GEMINI_MODEL="gemini-2.5-flash"   # fast & reliable in Jan 2026
 # ─── HELP ────────────────────────────────────────────────────────────────────
 show_help() {
     cat <<'EOF'
@@ -102,24 +101,48 @@ generate_gemini_message() {
     local diff_content="$1"
 
     if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+        echo "Gemini API key not found" >&2
         echo ""
         return
     fi
 
     echo "→ Using Google Gemini API (${GEMINI_MODEL})..." >&2
 
-    local prompt="Create a concise conventional commit message (max 72 chars) for these code changes. Format: type(scope): description. Types: feat, fix, refactor, perf, style, test, docs, build, ci, chore. Be specific.\n\nChanges:\n${diff_content}"
+    local prompt="Create a concise conventional commit message (max 72 chars) for these code changes. Format exactly: type(scope): description. Allowed types: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert. Be specific and meaningful based on the diff. No period at the end. Output ONLY the commit message, nothing else.\n\nChanges:\n${diff_content}"
 
-    local raw_output
-    raw_output=$(curl -s "https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}" \
-        -H 'Content-Type: application/json' \
+    local response
+    response=$(curl -s -X POST \
+        "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent" \
+        -H "Content-Type: application/json" \
+        -H "x-goog-api-key: ${GEMINI_API_KEY}" \
         -d '{
-          "contents": [{"parts": [{"text": "'"${prompt}"'"}]}],
-          "generationConfig": {"temperature": 0.3, "maxOutputTokens": 80}
-        }' | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null || echo "")
+          "contents": [{
+            "parts": [{
+              "text": "'"${prompt}"'"
+            }]
+          }],
+          "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 80
+          }
+        }' || echo "")
 
-    # Clean output
-    echo "$raw_output" | sed 's/^["'\'' ]*//; s/["'\'' ]*$//; s/\\n.*//g' | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+    local generated_text
+    generated_text=$(echo "$response" | jq -r '.candidates[0].content.parts[0].text // empty' 2>/dev/null)
+
+    # Clean the output
+    local cleaned
+    cleaned=$(echo "$generated_text" \
+        | sed 's/^["'\'' ]*//; s/["'\'' ]*$//; s/\\n.*//g' \
+        | tr -d '\n\r' \
+        | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    if [[ -n "$cleaned" && ${#cleaned} -le 80 && "$cleaned" =~ ^(feat|fix|refactor|perf|style|test|docs|build|ci|chore|revert)(\([^)]+\))?: ]]; then
+        echo "$cleaned"
+    else
+        echo "Gemini response invalid or empty" >&2
+        echo ""
+    fi
 }
 
 # ─── DECIDE MESSAGE ──────────────────────────────────────────────────────────
