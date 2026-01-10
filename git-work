@@ -118,7 +118,7 @@ generate_gemini_message() {
         -d '{
   "contents": [{
     "parts": [{
-      "text": "Generate EXACTLY ONE conventional commit message for these changes. Output NOTHING ELSE — no explanations, no lists, no quotes, no additional text. Format strictly: type(scope): description\n\nTypes: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert\nMax 72 characters. Be specific and accurate.\n\nChanges:\n'"${diff_content}"'"
+      "text": "Generate EXACTLY ONE conventional commit message for these changes. Output NOTHING ELSE — no explanations, no lists, no quotes, no additional text. Format strictly: type(scope): description\n\nTypes: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert\nMax 72 characters. Be specific and accurate.\n\nSummary:\n'"${diff_content}"'"
     }]
   }],
   "generationConfig": {
@@ -155,7 +155,12 @@ fi
 }
 
 # ─── DECIDE MESSAGE ──────────────────────────────────────────────────────────
-DIFF=$(git diff --cached)
+# Smart summarized diff for Gemini (avoids overload on large changes)
+DIFF_STATS=$(git diff --cached --stat | tail -n 10)
+DIFF_FILES=$(git diff --cached --name-only | sed 's/^/  - /' )
+DIFF_SAMPLE=$(git diff --cached | head -n 100 || echo "  (large diff truncated)")
+
+DIFF="Summary:\n$DIFF_STATS\n\nChanged files:\n$DIFF_FILES\n\nSample changes:\n$DIFF_SAMPLE"
 
 if $USE_AI && [ -n "$DIFF" ]; then
     AI_MSG=$(generate_gemini_message "$DIFF")
