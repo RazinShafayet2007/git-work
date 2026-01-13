@@ -149,7 +149,7 @@ generate_gemini_message() {
         echo "$cleaned"
     else
         # If debug is needed, uncomment the next line to see what Gemini actually sent
-        # echo "DEBUG: Gemini sent: [$cleaned]" >&2
+        echo "DEBUG: Gemini sent: [$cleaned]" >&2
         echo "Gemini response doesn't look like conventional commit" >&2
     fi
 }
@@ -209,4 +209,4 @@ if $AUTO_PUSH; then
     echo "Done! ✓"
 else
     echo "Commit created. Push when ready."
-fi
+fi// change
