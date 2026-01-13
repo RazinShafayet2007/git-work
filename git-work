@@ -115,7 +115,7 @@ generate_gemini_message() {
         '{
             contents: [{
                 parts: [{
-                    text: ("Generate EXACTLY ONE conventional commit message for these changes. Output NOTHING ELSE — no explanations, no lists, no quotes. \n\nFormat strictly: type(scope): description\nTypes: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert\nMax 72 chars.\n\nSummary:\n" + $diff)
+                    text: ("Generate EXACTLY ONE conventional commit message for these changes. Output NOTHING ELSE — no explanations, no lists, no quotes. \n\nFormat strictly: type(scope): description\nTypes: feat, fix, refactor, perf, style, test, docs, build, ci, chore, revert\nMax 72 chars.\n\nAnalyze the following git diff and write a specific message:\n" + $diff)
                 }]
             }],
             generationConfig: {
@@ -155,14 +155,17 @@ generate_gemini_message() {
 }
 
 # ─── DECIDE MESSAGE ──────────────────────────────────────────────────────────
-# Short safe summary for Gemini (no raw diff to avoid quoting/token issues)
-DIFF_STATS=$(git diff --cached --stat || echo "unknown changes")
-DIFF_FILES=$(git diff --cached --name-only | sed 's/^/  - /' || echo "  - various files")
+# Capture the actual diff (limit to ~100KB to stay within safe shell/API limits)
+# We use 'git diff --cached' to see what is staged.
+RAW_DIFF=$(git diff --cached | head -c 100000)
 
-DIFF="Changed files:\n$DIFF_FILES\n\nStats:\n$DIFF_STATS"
+# If we truncated, add a note so AI knows
+if [ ${#RAW_DIFF} -ge 100000 ]; then
+    RAW_DIFF="${RAW_DIFF}\n... (diff truncated)"
+fi
 
-if $USE_AI && [ -n "$DIFF" ]; then
-    AI_MSG=$(generate_gemini_message "$DIFF")
+if $USE_AI && [ -n "$RAW_DIFF" ]; then
+    AI_MSG=$(generate_gemini_message "$RAW_DIFF")
     if [ -n "$AI_MSG" ]; then
         COMMIT_MSG="$AI_MSG"
     else
